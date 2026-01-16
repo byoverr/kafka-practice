@@ -3,10 +3,15 @@
 Здесь представлены практические работы по Kafka.
 
 - [Практическая работа 1](https://github.com/byoverr/kafka-practice/practice1)
-
+- [Практическая работа 2](https://github.com/byoverr/kafka-practice/practice2)
 
 # Практическая работа 1
 
+### Задание
+
+Создать 1 producer, который каждую секунду будет отправлять данные, и 2 consumer, один из них читает каждое сообщение, а другой читает батчами по 10 сообщений
+
+### Запуск
 Для запуска нужен Docker
 ```bash
 git clone https://github.com/byoverr/kafka-practice.git
@@ -14,7 +19,7 @@ git clone https://github.com/byoverr/kafka-practice.git
 docker-compose -f ./practice1/docker-compose.yml up
 ```
 
-Структура:
+### Структура:
 
 - 3 брокера, настроены через KRaft
 - 1 producer, который шлет каждую секунду сообщение
@@ -23,4 +28,29 @@ docker-compose -f ./practice1/docker-compose.yml up
 В Docker-compose создается по две реплики каждого приложения, заметил, что при одинаковых key producer кидает в одну партицию и поэтому вторая реплика consumer не будет читать сообщения пока первая реплика не выйдет из строя и не случится rebalance. При этом producer будут работать вдвоем. 
 
 В качестве сериализатора/десериализотора использовал Protobuf
+
+
+# Практическая работа 2
+
+### Задание 
+
+Создать систему обработки потоков сообщений с функциями блокировки пользователей и цензуры сообщений. Развернуть систему с использованием Docker-сompose и настройте необходимые топики Kafka.
+
+Нужно добавить блокировку нежелательных пользователей и цензуру сообщений
+### Запуск
+Для запуска нужен Docker
+```bash
+git clone https://github.com/byoverr/kafka-practice.git
+
+docker-compose -f ./practice2/docker-compose.yml up
+```
+
+### Структура:
+
+- 3 брокера, настроены через KRaft
+- 1 go приложение
+
+Каждую секунду в топик `messages` кидается сообщение, каждые 20 секунд в `banned-words`, и раз в 15 секунд в `blocked-users`.
+Поэтому самому можно кинуть, но необязательно, смотреть по Kafka-UI: http://localhost:8080
+
   
