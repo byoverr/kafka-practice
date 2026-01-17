@@ -14,25 +14,26 @@ import (
 	"github.com/lovoo/goka/codec"
 )
 
-// Message
+// Message - сообщение между пользователями
 type Message struct {
 	SendUserID    int    `json:"send_user_id"`
 	ReceiveUserID int    `json:"receive_user_id"`
 	Message       string `json:"message"`
 }
 
-type BlockedUser struct {
-	Users []int `json:"blocked_users"`
+// State - общее состояние
+type State struct {
+	BannedWords  map[string]bool `json:"banned_words"`
+	BlockedUsers map[int][]int   `json:"blocked_users"`
 }
 
-// JsonCodec общий кодек, который предназначен для сериализации и десериализации в json
+// JsonCodec общий кодек для JSON
 type JsonCodec[T any] struct{}
 
 func (jc JsonCodec[T]) Encode(value interface{}) ([]byte, error) {
-	if user, ok := value.(T); ok {
-		return json.Marshal(user)
+	if v, ok := value.(T); ok {
+		return json.Marshal(v)
 	}
-
 	return nil, fmt.Errorf("illegal type: %T", value)
 }
 
@@ -44,58 +45,28 @@ func (jc JsonCodec[T]) Decode(data []byte) (interface{}, error) {
 	return t, nil
 }
 
-type BoolCodec struct{}
-
-func (b *BoolCodec) Encode(value interface{}) ([]byte, error) {
-	v, ok := value.(bool)
-	if !ok {
-		return nil, fmt.Errorf("BoolCodec: expected bool, got %T", value)
-	}
-	if v {
-		return []byte{1}, nil
-	}
-	return []byte{0}, nil
-}
-
-func (b *BoolCodec) Decode(data []byte) (interface{}, error) {
-	if len(data) == 0 {
-		return nil, nil
-	}
-	switch data[0] {
-	case 1:
-		return true, nil
-	case 0:
-		return false, nil
-	default:
-		return nil, fmt.Errorf("BoolCodec: invalid byte %v", data)
-	}
-}
-
 var (
-	brokers = []string{"kafka-0:9092", "kafka-1:9093", "kafka-2:9094"}
+	brokers = []string{"kafka-0:9092", "kafka-1:9092", "kafka-2:9092"}
 
 	topicMessages         goka.Stream = "messages"
 	topicFilteredMessages goka.Stream = "filtered-messages"
 	topicBlockedUsers     goka.Stream = "blocked-users"
 	topicBannedWords      goka.Stream = "banned-words"
 
-	groupBlockedUsers     goka.Group = "blocked-users-group"
-	groupFilteredMessages goka.Group = "filtered-messages-group"
-	groupBannedWords      goka.Group = "group-banned-words"
+	groupMain goka.Group = "main-processor-group"
 )
+
+const stateKey = "global-state"
 
 func main() {
 	go messageEmitter()
-	go blockProcessor()
-	go filterProcessor()
-	go banProcessor()
+	go mainProcessor()
 
-	select {} // Блокируем main, чтобы горутины работали
+	select {}
 }
 
-// messageEmitter — эмиттер, который генерирует данные в топик messages
+// messageEmitter — генерирует тестовые данные
 func messageEmitter() {
-	// emitters для всех топиков
 	msgEmitter, err := goka.NewEmitter(brokers, topicMessages, new(JsonCodec[Message]))
 	if err != nil {
 		log.Fatal(err)
@@ -114,28 +85,25 @@ func messageEmitter() {
 	}
 	defer blockEmitter.Finish()
 
-	// Таймеры
 	bannedTicker := time.NewTicker(15 * time.Second)
 	blockTicker := time.NewTicker(20 * time.Second)
 	defer bannedTicker.Stop()
 	defer blockTicker.Stop()
 
-	words := []string{"coffee", "car", "book", "music", "city", "work"}
+	words := []string{"coffee", "car", "book", "music", "city", "work", "movie", "apple", "orange", "pineapple", "bar", "fruit", "human"}
 
 	for {
 		select {
 		default:
-			// Каждую секунду отправляем обычное сообщение
 			time.Sleep(1 * time.Second)
 
-			sender := rand.IntN(100)   // от 0 до 9
-			receiver := rand.IntN(100) // от 0 до 9
+			sender := rand.IntN(50)
+			receiver := rand.IntN(50)
 			for receiver == sender {
-				receiver = rand.IntN(100) // не самому себе
+				receiver = rand.IntN(50)
 			}
 
-			// Случайная генерация текста
-			wordCount := rand.IntN(5) + 3
+			wordCount := rand.IntN(2) + 3
 			textParts := make([]string, wordCount)
 			for i := 0; i < wordCount; i++ {
 				textParts[i] = words[rand.IntN(len(words))]
@@ -148,132 +116,102 @@ func messageEmitter() {
 				Message:       text,
 			}
 
-			key := strconv.Itoa(sender)
-			if err := msgEmitter.EmitSync(key, m); err != nil {
-				log.Printf("Ошибка при отправке сообщения: %v", err)
+			// Ключ = stateKey, чтобы всё шло в одну партицию
+			if err := msgEmitter.EmitSync(stateKey, m); err != nil {
+				log.Printf("Ошибка отправки сообщения: %v", err)
 			} else {
 				log.Printf("Сообщение от %d к %d: %s", sender, receiver, text)
 			}
 
 		case <-bannedTicker.C:
-			// Каждые 15 сек добавляем новое запрещённое слово
-			newWord := "badword_" + strconv.Itoa(rand.IntN(10000))
-			if err := bannedEmitter.EmitSync(newWord, newWord); err != nil {
-				log.Printf("Ошибка при добавлении запрещённого слова: %v", err)
+			newWord := words[rand.IntN(len(words))]
+			if err := bannedEmitter.EmitSync(stateKey, newWord); err != nil {
+				log.Printf("Ошибка добавления слова: %v", err)
 			} else {
 				log.Printf("Добавлено запрещённое слово: %s", newWord)
 			}
 
 		case <-blockTicker.C:
-			// Каждые 20 сек пользователь блокирует другого
-			user := rand.IntN(100)
-			blocked := rand.IntN(100)
+			user := rand.IntN(50)
+			blocked := rand.IntN(50)
 			for blocked == user {
-				blocked = rand.IntN(100)
+				blocked = rand.IntN(50)
 			}
-			key := strconv.Itoa(user)
-			value := strconv.Itoa(blocked)
-
-			if err := blockEmitter.EmitSync(key, value); err != nil {
-				log.Printf("Ошибка при блокировке: %v", err)
+			value := fmt.Sprintf("%d:%d", user, blocked)
+			if err := blockEmitter.EmitSync(stateKey, value); err != nil {
+				log.Printf("Ошибка блокировки: %v", err)
 			} else {
-				log.Printf("Пользователь %s заблокировал %s", key, value)
+				log.Printf("Пользователь %d заблокировал %d", user, blocked)
 			}
 		}
 	}
 }
 
-// blockProcessor - процессор для обновления таблицы заблокированных пользователей
-func blockProcessor() {
-	processFunc := func(ctx goka.Context, msg interface{}) {
-		blockedID, _ := strconv.Atoi(msg.(string))
-		userID := ctx.Key()
-		var blocked BlockedUser
-		if ctx.Value() != nil {
-			blocked = ctx.Value().(BlockedUser)
-		}
-		blocked.Users = append(blocked.Users, blockedID)
-		ctx.SetValue(blocked)
-		log.Printf("Пользователь %s заблокировал %d", userID, blockedID)
-	}
-
-	g := goka.DefineGroup(groupBlockedUsers,
-		goka.Input(topicBlockedUsers, new(codec.String), processFunc),
-		goka.Persist(new(JsonCodec[BlockedUser])),
-	)
-
-	p, err := goka.NewProcessor(brokers, g)
+// mainProcessor - единственный процессор, обрабатывает все события
+func mainProcessor() {
+	emitter, err := goka.NewEmitter(brokers, topicFilteredMessages, new(JsonCodec[Message]))
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err = p.Run(context.Background()); err != nil {
-		log.Fatal(err)
-	}
-}
+	defer emitter.Finish()
 
-// banProcessor - процессор для обновления таблицы запрещённых слов
-func banProcessor() {
-	processFunc := func(ctx goka.Context, msg interface{}) {
-		word := msg.(string)
-		ctx.SetValue(true)
-		log.Printf("Добавлено запрещённое слово: %s", word)
-	}
-
-	g := goka.DefineGroup(groupBannedWords,
-		goka.Input(topicBannedWords, new(codec.String), processFunc),
-		goka.Persist(new(BoolCodec)),
-	)
-
-	p, err := goka.NewProcessor(brokers, g)
-	if err != nil {
-		log.Fatal(err)
-	}
-	if err = p.Run(context.Background()); err != nil {
-		log.Fatal(err)
-	}
-}
-
-// filterProcessor - процессор фильтрации сообщений
-func filterProcessor() {
-	// Создаём Views на таблицы
-	viewBlocked, _ := goka.NewView(brokers, goka.Table(topicBlockedUsers), new(JsonCodec[BlockedUser]))
-	viewBanned, _ := goka.NewView(brokers, goka.Table(topicBannedWords), new(BoolCodec))
-
-	go viewBlocked.Run(context.Background())
-	go viewBanned.Run(context.Background())
-
-	emitter, _ := goka.NewEmitter(brokers, topicFilteredMessages, new(JsonCodec[Message]))
-
-	processFunc := func(ctx goka.Context, msg interface{}) {
+	// Обработка сообщений
+	processMessage := func(ctx goka.Context, msg interface{}) {
 		m := msg.(Message)
+		state := getState(ctx)
 
-		// Проверка блокировки
-		blockedUsers, _ := viewBlocked.Get(strconv.Itoa(m.ReceiveUserID))
-		if blockedUsers != nil {
-			for _, u := range blockedUsers.(BlockedUser).Users {
-				if u == m.SendUserID {
+		// Проверяем блокировку
+		if blockedList, ok := state.BlockedUsers[m.ReceiveUserID]; ok {
+			for _, blockedID := range blockedList {
+				if blockedID == m.SendUserID {
 					log.Printf("Сообщение от %d к %d заблокировано", m.SendUserID, m.ReceiveUserID)
 					return
 				}
 			}
 		}
 
-		// Цензура запрещённых слов
+		// Фильтруем запрещённые слова
 		words := strings.Fields(m.Message)
 		for i, w := range words {
-			if val, _ := viewBanned.Get(w); val != nil {
+			if state.BannedWords[strings.ToLower(w)] {
 				words[i] = "****"
 			}
 		}
 		m.Message = strings.Join(words, " ")
 
-		// Отправка в filtered-messages
 		emitter.EmitSync(strconv.Itoa(m.ReceiveUserID), m)
 		log.Printf("Сообщение от %d к %d прошло фильтр: %s", m.SendUserID, m.ReceiveUserID, m.Message)
 	}
 
-	g := goka.DefineGroup(groupFilteredMessages,
-		goka.Input(topicMessages, new(JsonCodec[Message]), processFunc),
+	// Обработка banned words
+	processBannedWord := func(ctx goka.Context, msg interface{}) {
+		word := strings.ToLower(msg.(string))
+		state := getState(ctx)
+		state.BannedWords[word] = true
+		ctx.SetValue(state)
+		log.Printf("Запрещённое слово сохранено: %s", word)
+	}
+
+	// Обработка blocked users
+	processBlockedUser := func(ctx goka.Context, msg interface{}) {
+		parts := strings.Split(msg.(string), ":")
+		if len(parts) != 2 {
+			return
+		}
+		receiverID, _ := strconv.Atoi(parts[0])
+		blockedID, _ := strconv.Atoi(parts[1])
+
+		state := getState(ctx)
+		state.BlockedUsers[receiverID] = append(state.BlockedUsers[receiverID], blockedID)
+		ctx.SetValue(state)
+		log.Printf("Пользователь %d заблокировал отправителя %d", receiverID, blockedID)
+	}
+
+	g := goka.DefineGroup(groupMain,
+		goka.Input(topicMessages, new(JsonCodec[Message]), processMessage),
+		goka.Input(topicBannedWords, new(codec.String), processBannedWord),
+		goka.Input(topicBlockedUsers, new(codec.String), processBlockedUser),
+		goka.Persist(new(JsonCodec[State])),
 	)
 
 	p, err := goka.NewProcessor(brokers, g)
@@ -283,4 +221,15 @@ func filterProcessor() {
 	if err = p.Run(context.Background()); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// getState возвращает текущее состояние или создаёт новое
+func getState(ctx goka.Context) State {
+	if ctx.Value() == nil {
+		return State{
+			BannedWords:  make(map[string]bool),
+			BlockedUsers: make(map[int][]int),
+		}
+	}
+	return ctx.Value().(State)
 }

@@ -73,24 +73,44 @@ services:
       /bin/bash -c "sleep 10 && 
       /opt/bitnami/kafka/bin/kafka-topics.sh --create --if-not-exists 
       --bootstrap-server kafka-0:9092 
-      --partitions 3 
+      --partitions 1 
       --replication-factor 2
       --topic messages &&
       /opt/bitnami/kafka/bin/kafka-topics.sh --create --if-not-exists 
       --bootstrap-server kafka-0:9092 
-      --partitions 3 
+      --partitions 1 
       --replication-factor 2
       --topic blocked-users && 
       /opt/bitnami/kafka/bin/kafka-topics.sh --create --if-not-exists 
       --bootstrap-server kafka-0:9092 
-      --partitions 3 
+      --partitions 1 
       --replication-factor 2
-      -topic filtered-messages &&
+      --topic filtered-messages &&
       /opt/bitnami/kafka/bin/kafka-topics.sh --create --if-not-exists 
       --bootstrap-server kafka-0:9092 
-      --partitions 3 
+      --partitions 1 
       --replication-factor 2
-      -topic banned-words"
+      --topic banned-words &&
+      /opt/bitnami/kafka/bin/kafka-topics.sh --create --if-not-exists 
+      --bootstrap-server kafka-0:9092 
+      --partitions 1 
+      --replication-factor 2
+      --topic blocked-users-group &&
+      /opt/bitnami/kafka/bin/kafka-topics.sh --create --if-not-exists 
+      --bootstrap-server kafka-0:9092 
+      --partitions 1 
+      --replication-factor 2
+      --topic banned-words-group &&
+      /opt/bitnami/kafka/bin/kafka-topics.sh --create --if-not-exists 
+      --bootstrap-server kafka-0:9092 
+      --partitions 1 
+      --replication-factor 2
+      --topic blocked-users-group-table &&
+      /opt/bitnami/kafka/bin/kafka-topics.sh --create --if-not-exists 
+      --bootstrap-server kafka-0:9092 
+      --partitions 1 
+      --replication-factor 2
+      --topic banned-words-group-table"
 
   ui:
     image: provectuslabs/kafka-ui:v0.7.0
