@@ -86,5 +86,54 @@ docker-compose -f ./practice2-2/docker-compose.yml up
 `
 
 
+## Практическая работа 3
+
+### Задание
+
+Настроить Debezium Connector для передачи данных из базы данных PostgreSQL в Apache Kafka с использованием механизма Change Data Capture (CDC).
+
+### Запуск
+Для запуска нужен Docker
+```bash
+git clone https://github.com/byoverr/kafka-practice.git
+
+docker-compose -f ./practice3/docker-compose.yml up
+
+docker exec -it postgres psql -h 127.0.0.1 -U postgres-user -d customers // Создаем таблицы
+
+curl localhost:8083/connector-plugins // проверим коннекторы
+
+curl -X PUT -H 'Content-Type: application/json' --data @connector.json http://localhost:8083/connectors/pg-connector/config // конфигурируем коннектор
+
+```
+
+Запросы в psql:
+```sql
+CREATE TABLE users (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100),
+    email VARCHAR(100),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+
+CREATE TABLE orders (
+    id SERIAL PRIMARY KEY,
+    user_id INT REFERENCES users(id),
+    product_name VARCHAR(100),
+    quantity INT,
+    order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+### Структура:
+
+- 3 брокера, настроены через KRaft
+- Kafka Connect c Debezium
+- PostgreSQL
+- Grafana
+- Prometheus
+- Schema Registry
+
 
 
